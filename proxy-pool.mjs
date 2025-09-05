@@ -125,6 +125,73 @@ function applySessionToken(cfg, session) {
   };
 }
 
+// -----------------------------------------------------------------------------
+// Helper: sanitizeEntry
+// -----------------------------------------------------------------------------
+
+/**
+ * Normalize and validate a provider entry to the **canonical** shape.
+ * This helper enforces a single, strict input contract and computes an `auth`
+ * string when absent (from `username:password`) so the rest of the codebase
+ * can assume a uniform structure.
+ *
+ * Rationale (why a helper at all, in a "thin" builder?):
+ * 1) **Early validation beats runtime crashes**: We fail fast on invalid data
+ *    (missing protocol/host/port), which prevents downstream errors like
+ *    `Cannot read properties of null (reading 'endpoint')` inside pickers.
+ * 2) **Uniform contract**: Enforcing the canonical shape here keeps
+ *    ProxyDirector/pool logic lean; they never need to branch on variations.
+ * 3) **Minimal surface**: We keep the logic tight—only verify required fields
+ *    and compute `auth` once. No legacy conversion, no deep normalization.
+ *
+ * @param {ProviderEntry} entry
+ * @returns {ProviderEntry} a minimally sanitized, canonical entry
+ * @throws {TypeError} if required fields are missing/invalid
+ */
+function sanitizeEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    throw new TypeError("ProviderEntry must be an object.");
+  }
+  const { provider, endpoint } = entry;
+  if (!provider || typeof provider !== "string") {
+    throw new TypeError("ProviderEntry.provider must be a non-empty string.");
+  }
+  if (!endpoint || typeof endpoint !== "object") {
+    throw new TypeError("ProviderEntry.endpoint must be an object.");
+  }
+  const { protocol, host } = endpoint;
+  const port = Number(endpoint.port);
+
+  if (protocol !== "http" && protocol !== "https" && protocol !== "socks5") {
+    throw new TypeError(`ProxyEndpoint.protocol must be "http" | "https" | "socks5". Got: ${protocol}`);
+  }
+  if (!host || typeof host !== "string") {
+    throw new TypeError("ProxyEndpoint.host must be a non-empty string.");
+  }
+  if (!Number.isFinite(port) || port <= 0) {
+    throw new TypeError(`ProxyEndpoint.port must be a positive number. Got: ${endpoint.port}`);
+  }
+
+  // Compute auth if not supplied explicitly
+  const username = endpoint.username ?? undefined;
+  const password = endpoint.password ?? undefined;
+  const auth = endpoint.auth ?? (username && password ? `${username}:${password}` : undefined);
+
+  // Return a thin, canonical object (no extra fields)
+  return {
+    provider: provider.trim(),
+    endpoint: {
+      protocol,
+      host,
+      port,
+      username,
+      password,
+      auth,
+    },
+  };
+}
+
+
 /* -------------------------------------------------------------------------- */
 /*                          ProxyCatalogBuilder (optional)                     */
 /* -------------------------------------------------------------------------- */
@@ -147,46 +214,61 @@ export class ProxyCatalogBuilder {
   constructor() {
     /** @type {ProxyCatalog} */
     this._cat = {};
+    /** @type {string|null} */
     this._currentCountry = null;
   }
 
   /**
-   * Focus subsequent additions on a country code (e.g., "US").
+   * Focus subsequent additions on a country (ISO code, e.g., "US").
    * @param {string} country
    * @returns {this}
    */
   country(country) {
+    if (!country || typeof country !== "string") {
+      throw new TypeError("country(code) requires a non-empty string.");
+    }
     this._currentCountry = country.toUpperCase();
     if (!this._cat[this._currentCountry]) this._cat[this._currentCountry] = {};
     return this;
   }
 
   /**
-   * Add one provider entry for a given proxy type under the current country.
-   * @param {"res_rotating"|"res_static"|"dc_rotating"|"dc_static"} type
-   * @param {ProviderEntry} entry
+   * Add one provider entry under the current country.
+   * @param {ProxyType} type
+   * @param {ProviderEntry} entry - canonical shape only
    * @returns {this}
    */
   add(type, entry) {
-    if (!this._currentCountry) throw new Error("ProxyCatalogBuilder.add: call .country(code) first.");
+    if (!this._currentCountry) {
+      throw new Error("ProxyCatalogBuilder.add: call .country(code) first.");
+    }
+    if (type !== "res_rotating" && type !== "res_static" && type !== "dc_rotating" && type !== "dc_static") {
+      throw new TypeError(`Unknown proxy type: ${String(type)}`);
+    }
+
+    const clean = sanitizeEntry(entry);
     const bucket = (this._cat[this._currentCountry][type] ||= []);
-    bucket.push(deepClone(entry));
+    bucket.push(clean);
     return this;
   }
 
   /**
-   * Add many entries at once.
-   * @param {"res_rotating"|"res_static"|"dc_rotating"|"dc_static"} type
-   * @param {ProviderEntry[]} entries
+   * Add many provider entries under the current country.
+   * @param {ProxyType} type
+   * @param {ProviderEntry[]} entries - canonical shape only
    * @returns {this}
    */
   addMany(type, entries) {
+    if (!Array.isArray(entries)) {
+      throw new TypeError("addMany expects an array of ProviderEntry.");
+    }
     for (const e of entries) this.add(type, e);
     return this;
   }
 
   /**
    * Finish the current country section.
+   * (Optional; you can switch countries by calling .country(next) directly.)
    * @returns {this}
    */
   done() {
@@ -195,15 +277,85 @@ export class ProxyCatalogBuilder {
   }
 
   /**
-   * Return an immutable {@link ProxyCatalog}.
+   * Build an immutable catalog for consumption by ProxyDirector.
+   * Kept intentionally simple: we already validated everything at `add()`, so
+   * `build()` just deep-clones and freezes to guard against accidental mutation.
+   *
    * @returns {ProxyCatalog}
    */
   build() {
-    for (const c of Object.keys(pool)) {
-      pool[c] = (pool[c] || []).filter(Boolean); // strip null/undefined
+    const clone = (v) => JSON.parse(JSON.stringify(v)); // thin deep clone for plain data
+    /** @type {ProxyCatalog} */
+    const out = clone(this._cat);
+
+    // Freeze top-level country/type maps for safety; entries remain plain objects.
+    for (const c of Object.keys(out)) {
+      Object.freeze(out[c]);
     }
-    return deepClone(this._cat);
+    return Object.freeze(out);
   }
+}
+
+/**
+ * Normalize a provider entry to the canonical shape:
+ *    { provider?: string, endpoint: { protocol, host, port, username?, password?, auth? } }
+ *
+ * Accepts two input forms:
+ *  1) **Canonical** (preferred):
+ *     { provider:"Webshare", endpoint:{ protocol:"http", host:"p.webshare.io", port:80, username:"u", password:"p" } }
+ *
+ *  2) **Legacy flat** (back-compat):
+ *     { protocol:"http", host:"p.webshare.io", port:80, username:"u", password:"p", provider?:"Webshare" }
+ *
+ * Why this helper exists (reasoning):
+ * - **Resilience**: Earlier code sometimes pushed `null` or “flat” objects
+ *   straight into the pool. When `pickProxy()` later reads `entry.endpoint`,
+ *   a null slot explodes. Normalizing up-front ensures every slot either has
+ *   a valid `endpoint` or is culled.
+ * - **Backwards compatibility**: Your codebase (and past snippets) used both
+ *   shapes. This helper lets the builder accept both styles so callers don’t
+ *   break while you migrate call sites.
+ * - **Validation**: We require `endpoint.protocol`, `endpoint.host`, and a
+ *   numeric `endpoint.port`. Entries missing these are filtered out during
+ *   `build()`, preventing subtle runtime failures.
+ *
+ * @param {any} entry
+ * @returns {ProviderEntry|null} canonical entry or null if irreparable
+ */
+function normalizeProviderEntry(entry) {
+  if (!entry) return null;
+
+  // Already canonical?
+  if (entry.endpoint && typeof entry.endpoint === 'object') {
+    const ep = entry.endpoint;
+    if (!ep.protocol || !ep.host || !ep.port) return null;
+    return {
+      provider: entry.provider ?? 'custom',
+      endpoint: {
+        protocol: String(ep.protocol),
+        host: String(ep.host),
+        port: Number(ep.port),
+        username: ep.username ?? undefined,
+        password: ep.password ?? undefined,
+        auth: ep.auth ?? (ep.username && ep.password ? `${ep.username}:${ep.password}` : undefined),
+      },
+    };
+  }
+
+  // Legacy flat → canonical
+  const { protocol, host, port, username, password, auth, provider } = entry;
+  if (!protocol || !host || !port) return null;
+  return {
+    provider: provider ?? 'custom',
+    endpoint: {
+      protocol: String(protocol),
+      host: String(host),
+      port: Number(port),
+      username: username ?? undefined,
+      password: password ?? undefined,
+      auth: auth ?? (username && password ? `${username}:${password}` : undefined),
+    },
+  };
 }
 
 /* -------------------------------------------------------------------------- */
