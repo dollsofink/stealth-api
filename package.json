@@ -1,0 +1,34 @@
+{
+  "name": "stealth-api",
+  "version": "1.0.0",
+  "description": "Uber STEALTH for Automated Browsers & HTTP Clients. Features weighted random proxy map, weighted random device emulator (w/ updates for MOST POPULAR DEVICES of current year), cookie injection (Firebug exploit), CAPTCHA cracking.",
+  "keywords": [
+    "stealth",
+    "proxy",
+    "puppeteer",
+    "axios",
+    "fetch",
+    "anonymous"
+  ],
+  "license": "UNLICENSED",
+  "author": "MrValentine <dollsofink@gmail.com>",
+  "type": "module",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "axios": "^1.11.0",
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.6",
+    "puppeteer-core": "^24.17.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "tough-cookie": "^6.0.0",
+    "user-agents": "^1.1.645"
+  },
+  "devDependencies": {}
+}
