@@ -52,6 +52,7 @@ export {
   makeEndpointClass,
   EndpointManager,
 } from "./classes/api-client.mjs";
+export { ApiPoster as StealthAPI } from "./classes/api-client.mjs";
 
 // ------------------------------- UA utilities ---------------------------------
 export { pick2025UA, buildHeadersForUA } from "./helpers/ua.mjs";

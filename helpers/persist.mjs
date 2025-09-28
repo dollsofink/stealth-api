@@ -69,7 +69,7 @@ export function buildInsertFromObject(root, table, paths, { alias = {}, transfor
  *   whitelist: ["url", "lastStatus", "headers.User-Agent"],
  * });
  */
-export function attachPersistence(Klass, cfg) {
+export default function attachPersistence(Klass, cfg) {
   // Keep config on the class for reference / overrides later
   Object.defineProperty(Klass, "persistence", {
     value: { ...cfg },

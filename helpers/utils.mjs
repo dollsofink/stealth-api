@@ -676,3 +676,16 @@ export function pickWeighted(list) {
  * @returns {T}
  */
 export const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+// Aggregating all exports into a single Utils object.
+const Utils = {
+    randomSleep,
+    sleep,
+    buildInsertQuery,
+    random,
+    toProbability,
+    chance,
+};
+
+// Exporting the Utils object as the default export.
+export default Utils;

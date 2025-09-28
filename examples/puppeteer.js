@@ -1,24 +1,32 @@
 import { Puppeteer } from "stealth-api";
+import puppeteer from 'puppeteer-extra'
 
 // Looks & feels like vanilla Puppeteer. Your existing page.* code works unchanged.
-const browser = new Puppeteer({
-  headless: "new",
+const bot = new Puppeteer({
+  headless: false,
   userDataDir: ".profiles/default",
-  stealth: true
+  stealth: true,
+  channel: "chrome"
 });
 
-await browser.launch();
+// Get all property names, including non-enumerable ones
+const allProperties = Object.getOwnPropertyNames(Puppeteer.prototype)
+
+// Log the properties
+console.log(allProperties)
+await bot.launch();
+const page = bot.page
+const browser = bot.browser
 
 // Reuse your existing script as-is:
-const page = await browser.newPage();
-await page.goto("https://example.com", { waitUntil: "networkidle2" });
+await page.goto("https://google.com", { waitUntil: "load" });
 const title = await page.title();
 console.log({ title });
 
 // Or run your native script in a disposable page:
-await browser.usingPage(async (page) => {
-  await page.goto("https://news.ycombinator.com");
-  await page.screenshot({ path: "hn.png" });
-});
+// await browser.usingPage(async (page) => {
+//   await page.goto("https://news.ycombinator.com");
+//   await page.screenshot({ path: "hn.png" });
+// });
 
 await browser.close();
