@@ -1,6 +1,6 @@
 {
   "name": "stealth-api",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Uber STEALTH for Automated Browsers & HTTP Clients & ExpressJS (reverse proxy). Features weighted random proxy map, weighted random device emulator (w/ updates for MOST POPULAR DEVICES of current year), cookie injection (Firebug exploit), CAPTCHA cracking.",
   "keywords": [
     "stealth",

@@ -7,9 +7,9 @@ import { randomBytes } from "node:crypto";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { HttpProxyAgent } from "http-proxy-agent";
 import { CookieJar } from "tough-cookie";
-import { pick2025UA, buildHeadersForUA } from "./ua.mjs";
-import { ProxyDirector } from "./proxy-pool.mjs";
-import Cookies from "../src/cookies.mjs"; // ← NEW: universal cookie parser
+import { pick2025UA, buildHeadersForUA } from "../helpers/ua.mjs";
+import { ProxyDirector } from "../helpers/proxy-pool.mjs";
+import Cookies from "../helpers/cookies.mjs"; // ← NEW: universal cookie parser
 
 /**
  * @module helpers/api-client
