@@ -1,17 +1,20 @@
 {
   "name": "stealth-api",
-  "version": "1.0.0",
-  "description": "Uber STEALTH for Automated Browsers & HTTP Clients. Features weighted random proxy map, weighted random device emulator (w/ updates for MOST POPULAR DEVICES of current year), cookie injection (Firebug exploit), CAPTCHA cracking.",
+  "version": "1.4.2",
+  "description": "Uber STEALTH for Automated Browsers & HTTP Clients & ExpressJS (reverse proxy). Features weighted random proxy map, weighted random device emulator (w/ updates for MOST POPULAR DEVICES of current year), cookie injection (Firebug exploit), CAPTCHA cracking.",
   "keywords": [
     "stealth",
     "proxy",
     "puppeteer",
     "axios",
     "fetch",
-    "anonymous"
+    "anonymous",
+    "browser automation",
+    "automation",
+    "reverse proxy"
   ],
   "license": "UNLICENSED",
-  "author": "MrValentine <dollsofink@gmail.com> + Alien Superintelligence",
+  "author": "MisterValentine <dollsofink@gmail.com> + Alien Superintelligence",
   "type": "module",
   "main": "index.js",
   "directories": {
@@ -20,16 +23,22 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "npx puppeteer browsers install chrome",
-	"publish": "npm publish"
+    "publish": "npm publish"
   },
   "dependencies": {
     "axios": "^1.11.0",
     "http-proxy-agent": "^7.0.2",
     "https-proxy-agent": "^7.0.6",
+    "mysql2": "^3.15.1",
     "puppeteer-core": "^24.17.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "stealth-api": "^1.4.0",
     "tough-cookie": "^6.0.0",
     "user-agents": "^1.1.645"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./puppeteer": "./puppeteer.js"
   }
 }

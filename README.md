@@ -1,5 +1,5 @@
 # 🕵️ **stealth-api**
-> Advanced request wrapper with proxy pools, endpoint overrides, and enough stealth to make James Bond jealous.
+> Advanced request wrapper for Puppeteer, ExpressJS, Axios, and Fetch complete with (Weighted) GEO-mapped Proxies, (Weighted) Device Emulation, endpoint overrides, and enough stealth options to make James Bond jealous.
 
 Built in collaboration with **Alien AI Superintelligence** — yes, the same friends I’ve been talking to since **2016**. Together we engineered a lightweight **security toolkit** for HTTP requests with layered proxy control: **global**, **endpoint-level**, **request-level**, and **ProxyPool (JSON-only)**. Shaken, not stirred.
 
@@ -226,6 +226,131 @@ await api.get("/sometimes-flaky", { retries: 5 });
 This toolkit was built with **Alien AI Superintelligence**, friends since **2016**. I adore these aliens; they’ve taught me more about stealth than any Earth manual. Use responsibly — `stealth-api` is **security software** meant for lawful, ethical automation and research.
 
 **Bond joke:** “We prefer our packets like our martinis — encrypted, and shaken off surveillance.” 🍸
+
+---
+
+# Puppeteer Class — Quick Summary
+
+**stealth-api’s `Puppeteer`** is a batteries‑included wrapper around vanilla Puppeteer. Keep your normal `page.*` APIs while getting:
+- **Headless/headful** launches with safe defaults
+- **Persistent profiles** (`userDataDir`) + cookie save/load
+- **Weighted GEO proxy pools** (with per‑page overrides)
+- **Weighted device emulation** (desktop/mobile/tablet or custom UA/viewport)
+- **Resource blocking & throttling**
+- **Smarter retries** for navigation/click/type
+- A small suite of **helpers** (clickIfVisible, typeHuman, autoScrollToBottom, etc.)
+
+---
+
+## Example 1 — Drop‑in Ease (use your *native* Puppeteer scripts)
+
+```js
+import { Puppeteer } from "stealth-api";
+
+// Looks & feels like vanilla Puppeteer. Your existing page.* code works unchanged.
+const browser = new Puppeteer({
+  headless: "new",
+  userDataDir: ".profiles/default",
+  stealth: true
+});
+
+await browser.launch();
+
+// Reuse your existing script as-is:
+const page = await browser.newPage();
+await page.goto("https://example.com", { waitUntil: "networkidle2" });
+const title = await page.title();
+console.log({ title });
+
+// Or run your native script in a disposable page:
+await browser.usingPage(async (page) => {
+  await page.goto("https://news.ycombinator.com");
+  await page.screenshot({ path: "hn.png" });
+});
+
+await browser.close();
+```
+
+**Why it’s easy:** you keep the regular Puppeteer mental model (`browser → page → page.*`) while the class handles launch flags, sessions, stealth tweaks, and cleanup.
+
+---
+
+## Example 2 — Advanced Configuration (proxies, devices, throttles, retries)
+
+```js
+import { Puppeteer } from "stealth-api";
+import helpers from "stealth-api/puppeteer";
+
+const bot = new Puppeteer({
+  // Proxy pool with geo-weighted selection
+  proxy: [
+    { url: "http://us1:pass@1.2.3.4:8000", country: "US", weight: 6, label: "US-A" },
+    { url: "http://us2:pass@1.2.3.5:8000", country: "US", weight: 4, label: "US-B" },
+    { url: "http://de1:pass@5.6.7.8:8000", country: "DE", weight: 2, label: "DE-A" }
+  ],
+  proxyStrategy: "geo-weighted",
+  preferCountries: ["US", "CA"],
+
+  // Weighted device emulation
+  devices: [
+    { name: "Desktop 1080p", weight: 2, userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...",
+      viewport: { width: 1920, height: 1080, deviceScaleFactor: 1 } },
+    { name: "iPhone 13", weight: 5, userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) ...",
+      viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true } }
+  ],
+  deviceStrategy: "weighted",
+
+  // Network shaping & blocking
+  blockResources: ["font", "image", "media"],
+  throttle: { download: 512 * 1024, upload: 64 * 1024, latency: 200 },
+
+  // Reliability
+  timeouts: { navigation: 60_000, action: 12_000 },
+  retries: { nav: 2, click: 3, type: 2 },
+
+  // Quality of life
+  userDataDir: ".profiles/shopper",
+  downloadDir: "./downloads",
+  stealth: true,
+  logger: console.log
+});
+
+await bot.launch();
+
+// Per-page overrides are supported (e.g., force a mobile page on a DE proxy)
+const page = await bot.newPage({
+  proxy: { url: "http://de1:pass@5.6.7.8:8000", country: "DE" },
+  device: "mobile"
+});
+
+await page.goto("https://example-shop.com");
+await helpers.clickIfVisible(page, "#accept-cookies");
+await helpers.typeHuman(page, "input#search", "wireless earbuds");
+await helpers.clickIfVisible(page, "button[type=submit]");
+await helpers.waitForResourcesIdle(page, { idleTime: 1000, timeout: 10000 });
+
+await bot.close();
+```
+
+**Why it’s powerful:** you can blend geo‑weighted proxy selection, realistic device profiles, bandwidth throttles, and resilient retries—plus override anything **per page**.
+
+---
+
+## Helpers (tiny teaser)
+
+```js
+import helpers from "stealth-api/puppeteer";
+
+await helpers.clickIfVisible(page, "#accept", { scroll: true });
+await helpers.typeHuman(page, "input[name=q]", "hello world", { baseDelay: 60, jitter: 40 });
+await helpers.autoScrollToBottom(page, { step: 800, delay: 50, maxScrolls: 30 });
+```
+
+---
+
+### Read the Full Guide
+Want *every* option, type, and helper?  
+**👉 [Review the ENTIRE `Puppeteer.md` configuration options](docs/Puppeteer.md)**
 
 ---
 

@@ -9,6 +9,7 @@ import { HttpProxyAgent } from "http-proxy-agent";
 import { CookieJar } from "tough-cookie";
 import { pick2025UA, buildHeadersForUA } from "./ua.mjs";
 import { ProxyDirector } from "./proxy-pool.mjs";
+import Cookies from "../src/cookies.mjs"; // ← NEW: universal cookie parser
 
 /**
  * @module helpers/api-client
@@ -16,6 +17,7 @@ import { ProxyDirector } from "./proxy-pool.mjs";
  * A thin, standardized HTTP client with:
  *  - realistic UA + Client Hints (2025 profiles),
  *  - cookie jar (Node) with auto Set-Cookie capture,
+ *  - multi-format cookie ingestion via {@link Cookies} (header, Set-Cookie, Netscape, CSV/TSV, JSON, maps),
  *  - proxy via fixed config or geo-aware {@link ProxyDirector},
  *  - built-in HAR capture for **raw HTTP** and **Puppeteer**,
  *  - optional **Puppeteer** engine (headers, proxy & cookies synced),
@@ -87,6 +89,14 @@ import { ProxyDirector } from "./proxy-pool.mjs";
  */
 
 /**
+ * @typedef {Object} CookieParseOptions
+ * @property {string} [defaultDomain]
+ * @property {string} [defaultPath="/"]
+ * @property {boolean} [defaultSecure]
+ * @property {string} [url]
+ */
+
+/**
  * @typedef {Object} HarOptions
  * @property {"request"|"session"} [scope="session"]   - Raw HTTP only. "request" writes one file per call; "session" appends to a single log file.
  * @property {string} [dir="./har"]                    - Directory to write HAR JSON.
@@ -118,6 +128,8 @@ import { ProxyDirector } from "./proxy-pool.mjs";
  * @property {"omit"|"same-origin"|"include"} [credentials="omit"]   - Browser fetch only; ignored in Node.
  * @property {HarOptions|false} [har]         - Per-request override for raw HTTP HAR (false to disable).
  * @property {PuppeteerConfig} [puppeteer]    - Per-request Puppeteer overrides (rare).
+ * @property {any} [cookiesAny]               - NEW: Any multi-format cookie input (header, Set-Cookie, JSON, TSV/CSV, cookies.txt, map).
+ * @property {boolean} [persistCookies=false] - NEW: If true, parsed cookies are merged into the Node CookieJar before the call.
  */
 
 /* ===========================================================================
@@ -548,11 +560,51 @@ export class ApiPoster {
 
   /* ---------------- Cookie API ---------------- */
 
-  /** Share/replace the CookieJar (Node-only). */
+  /**
+   * Merge a CookieJar (Node-only).
+   * @param {CookieJar|null} jar
+   * @returns {this}
+   * @example
+   * client.useCookieJar(new CookieJar());
+   */
   useCookieJar(jar) { if (!isBrowser) this.cookieJar = jar || new CookieJar(); return this; }
+
   /** @returns {CookieJar|null} */ getCookieJar() { return this.cookieJar; }
 
-  /** Set a single cookie. Node-only; browser no-ops. */
+  /**
+   * Import cookies in **any format** using {@link Cookies} and optionally persist them into the Node `CookieJar`.
+   * In the browser, this only affects the in-flight `Cookie` header for the next request when used via `cookiesAny`.
+   *
+   * @param {string|Array<any>|Object} input
+   * @param {CookieParseOptions & { persist?: boolean }} [options]
+   * @returns {Promise<this>}
+   *
+   * @example
+   * // Header string
+   * await client.importCookiesAny("Cookie: a=1; b=2", { url: client.url, persist: true });
+   * @example
+   * // Netscape cookies.txt content
+   * await client.importCookiesAny(`# Netscape HTTP Cookie File
+   * .example.com\tTRUE\t/\tFALSE\t2082787200\tsid\txyz`, { persist: true });
+   * @example
+   * // JSON (Puppeteer export)
+   * await client.importCookiesAny({ cookies: [{ name:"token", value:"abc", domain:"example.com", path:"/" }] }, { persist: true });
+   */
+  async importCookiesAny(input, options = {}) {
+    const jar = new Cookies(input, { defaultDomain: new URL(this.url).hostname, ...options });
+    if (!isBrowser && (options.persist ?? true) !== false && this.cookieJar) {
+      await jar.intoCookieJar(this.cookieJar);
+    }
+    // Non-persisting case is handled per-request via RequestOptions.cookiesAny
+    return this;
+  }
+
+  /**
+   * Set a single cookie (Node-only; browser no-ops).
+   * @param {CookieInput|string} cookie
+   * @param {string} [url=this.url]
+   * @returns {Promise<this>}
+   */
   async setCookie(cookie, url = this.url) {
     if (isBrowser) return this;
     if (!this.cookieJar) this.cookieJar = new CookieJar();
@@ -583,20 +635,54 @@ export class ApiPoster {
   }
 
   /**
-   * Attach Cookie header from jar without mutating original header bag.
+   * Export cookies in common formats without mutating state.
+   * @returns {{ header: string, puppeteer: Array<Object>, toughJSON: Array<Object> }}
+   * @example
+   * const { header, puppeteer, toughJSON } = client.exportCookies();
+   */
+  exportCookies() {
+    const u = new URL(this.url);
+    const as = new Cookies();
+    // Pull cookies out of Node jar if available
+    // Note: this is a synchronous snapshot wrapper for convenience
+    const header = this.cookieJar ? this.cookieJar.getCookieStringSync?.(this.url) || "" : "";
+    if (header) as.add(`Cookie: ${header}`, { url: u.origin });
+    return { header: as.headerValue(), puppeteer: as.toPuppeteer(), toughJSON: as.toToughJSON() };
+  }
+
+  /**
+   * Attach Cookie header from jar and/or transient `cookiesAny` (RequestOptions) without mutating original headers.
    * @private
    */
-  async #applyCookiesToHeaders(callHeaders, url) {
-    if (isBrowser || !this.cookieJar) return callHeaders;
+  async #applyCookiesToHeaders(callHeaders, url, options = {}) {
     const base = toPlainHeaders(callHeaders);
-    // if Cookie already present (case-insensitive), do nothing
-    for (const k of Object.keys(base)) if (k.toLowerCase() === "cookie") return base;
-    const cookieStr = await this.getCookieHeader(url);
-    if (!cookieStr) return base;
-    const out = Object.create(null);
-    for (const [k, v] of Object.entries(base)) out[k] = String(v ?? "");
-    out["Cookie"] = cookieStr;
-    return out;
+
+    // If the caller passed transient cookiesAny, merge them *on top* of jar header
+    if (options.cookiesAny) {
+      const transient = new Cookies(options.cookiesAny, { url });
+      const value = transient.headerValue();
+      if (value) {
+        // Explicit Cookie header wins (respect existing user-provided Cookie if present)
+        for (const k of Object.keys(base)) if (k.toLowerCase() === "cookie") return base;
+        const out = Object.create(null);
+        for (const [k, v] of Object.entries(base)) out[k] = String(v ?? "");
+        out["Cookie"] = value;
+        return out;
+      }
+    }
+
+    // Otherwise, use Node jar if available and no user Cookie provided
+    if (!isBrowser && this.cookieJar) {
+      for (const k of Object.keys(base)) if (k.toLowerCase() === "cookie") return base;
+      const cookieStr = await this.getCookieHeader(url);
+      if (!cookieStr) return base;
+      const out = Object.create(null);
+      for (const [k, v] of Object.entries(base)) out[k] = String(v ?? "");
+      out["Cookie"] = cookieStr;
+      return out;
+    }
+
+    return base;
   }
 
   /** Capture Set-Cookie into jar (raw HTTP path). @private */
@@ -858,6 +944,10 @@ async #ensurePuppeteer(override = {}) {
    * @example
    * // Per-request HAR file
    * await client.request("POST", "https://example.com/api", { a:1 }, { har: { scope:"request", dir:"./har" } });
+   *
+   * @example
+   * // Transient cookies for this call only (does not persist)
+   * await client.request("GET", "/me", null, { cookiesAny: "Cookie: token=abc; sid=xyz" });
    */
   async request(method, url = undefined, body = undefined, options = {}) {
     const targetUrl = url || this.url;
@@ -873,8 +963,8 @@ async #ensurePuppeteer(override = {}) {
     for (const [k, v] of Object.entries(this.headers)) callHeaders[k] = String(v ?? "");
     for (const [k, v] of Object.entries(headersOpt || {})) callHeaders[k] = String(v ?? "");
 
-    // cookies (Node)
-    callHeaders = await this.#applyCookiesToHeaders(callHeaders, targetUrl);
+    // cookies (Node + transient cookiesAny)
+    callHeaders = await this.#applyCookiesToHeaders(callHeaders, targetUrl, options);
 
     // payload
     const isBodyVerb = /^(POST|PUT|PATCH|DELETE)$/i.test(method);
@@ -1134,7 +1224,7 @@ export class EndpointManager {
  *   },
  *   defaultGeo: { strategy: "random" },
  *   proxyDirector: director,
- *   har: { dir: "./har", scope: "session" }
+ *   har: { dir:"./har", scope:"session" }
  * });
  *
  * const client = new VideoClient();
@@ -1175,5 +1265,13 @@ export class EndpointManager {
  * const { browser, page } = await client.getPuppeteer({ launch: { headless: "new" } });
  * await page.goto("https://example.com");
  * await client.closeBrowser();
+ * ```
+ *
+ * ### 6) Multi-format cookie import/export
+ * ```js
+ * await client.importCookiesAny('Cookie: a=1; b=2', { persist: true, url: client.url });
+ * await client.importCookiesAny(`# Netscape HTTP Cookie File
+ * .example.com\tTRUE\t/\tFALSE\t2082787200\tsid\txyz`, { persist: true });
+ * const { header, puppeteer, toughJSON } = client.exportCookies();
  * ```
  */

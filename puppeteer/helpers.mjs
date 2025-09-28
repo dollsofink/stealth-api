@@ -1,7 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import puppeteer from 'puppeteer';
 import { sleep } from '../utils.mjs';
 
 /**
