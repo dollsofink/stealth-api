@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { sleep } from '../utils.mjs';
+import { sleep } from '../helpers/utils.mjs';
 
 /**
  * Try to click an element **only if** it currently exists and is actually visible on screen.
